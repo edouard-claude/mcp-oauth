@@ -1,0 +1,99 @@
+---
+description: Règles pour l'implémentation OAuth2 et la sécurité
+globs: ["oauth2/**", "mcp/auth_middleware.go"]
+alwaysApply: false
+---
+
+# OAuth2 et Sécurité
+
+## Implémentation OAuth2
+
+### Flux d'Autorisation
+
+Le serveur implémente le flux d'autorisation OAuth2 complet :
+
+1. **Découverte** : Via `.well-known/oauth-protected-resource` (RFC9728)
+2. **Enregistrement Client** : Via `/register` (RFC7591) si nécessaire
+3. **Autorisation** : Via `/authorize` avec PKCE obligatoire
+4. **Token** : Via `/token` pour échanger le code contre un token
+5. **Validation** : Validation stricte des tokens dans `RequireAuth`
+
+### PKCE (RFC7636)
+
+- **Toujours requis** : Tous les clients doivent utiliser PKCE
+- Génération : `code_verifier` (43-128 caractères, base64url)
+- Challenge : `code_challenge` = base64url(sha256(code_verifier))
+- Méthode : `S256` uniquement (pas de `plain`)
+- Validation : Vérifier le `code_verifier` lors de l'échange du token
+
+### Validation des Tokens
+
+Dans `TokenValidator.ValidateToken()` :
+
+1. **Signature JWT** : Vérifier avec `jwtSecret` si mode serveur intégré
+2. **Expiration** : Vérifier `exp` claim
+3. **Audience** : Vérifier que `aud` contient la resource URI (RFC8707)
+4. **Issuer** : Vérifier `iss` correspond au serveur d'autorisation
+5. **Scopes** : Extraire et valider les scopes
+
+### Resource Indicators (RFC8707)
+
+- Le paramètre `resource` peut être inclus dans les requêtes OAuth2
+- Valider que le token a l'audience correcte pour la resource demandée
+- Utiliser `resourceURI` dans la validation des tokens
+
+## Sécurité
+
+### CORS
+
+- Valider l'`Origin` header pour prévenir DNS rebinding
+- Autoriser uniquement les origines valides
+- Headers CORS autorisés : `Authorization, Content-Type, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID, MCP-Proxy-Token`
+- Support des requêtes preflight OPTIONS
+
+### Headers de Sécurité
+
+- Ne jamais exposer les tokens dans les logs (tronquer avec `...`)
+- Ne jamais mettre les tokens dans les query strings
+- Utiliser `Authorization: Bearer <token>` uniquement
+
+### Sessions
+
+- Session IDs générés de manière cryptographiquement sécurisée
+- Durée de vie limitée (24h par défaut)
+- Nettoyage automatique des sessions expirées
+
+### Serveur d'Autorisation Intégré
+
+Quand `AuthorizationServer == ServerURL` :
+
+- Générer des JWT avec signature HMAC-SHA256
+- Utiliser `JWTSecret` pour signer/vérifier
+- Stocker les codes d'autorisation avec expiration (10 minutes)
+- Stocker les clients enregistrés dynamiquement
+
+### Validation des Requêtes
+
+- Vérifier la méthode HTTP (GET pour SSE, POST pour JSON-RPC)
+- Vérifier les headers requis (`Mcp-Session-Id`, `MCP-Protocol-Version`)
+- Valider le format JSON-RPC 2.0
+- Rejeter les requêtes malformées avec erreur appropriée
+
+## Gestion des Erreurs OAuth2
+
+Retourner les erreurs selon OAuth 2.1 :
+
+- `invalid_request` : Requête malformée
+- `invalid_client` : Client invalide ou non authentifié
+- `invalid_grant` : Code d'autorisation invalide ou expiré
+- `unauthorized_client` : Client non autorisé pour ce flux
+- `unsupported_grant_type` : Type de grant non supporté
+- `invalid_scope` : Scope invalide
+
+Format de réponse :
+```json
+{
+  "error": "invalid_request",
+  "error_description": "Description détaillée"
+}
+```

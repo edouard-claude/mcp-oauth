@@ -1,0 +1,106 @@
+---
+description: Architecture et conventions générales du projet OAuth2 MCP Server
+alwaysApply: true
+---
+
+# Architecture et Conventions du Projet
+
+## Structure du Projet
+
+Ce projet est un serveur MCP (Model Context Protocol) avec authentification OAuth2, implémentant les spécifications :
+- MCP 2025-06-18 (Transport HTTP Streamable, cycle de vie, JSON-RPC 2.0)
+- OAuth 2.1 (Flux d'autorisation, PKCE, validation tokens)
+- RFC8414 (Authorization Server Metadata)
+- RFC7591 (Dynamic Client Registration)
+- RFC9728 (Protected Resource Metadata)
+- RFC8707 (Resource Indicators)
+
+### Organisation des Packages
+
+- `main.go` : Point d'entrée du serveur
+- `mcp/` : Package principal MCP (transport, sessions, handlers, middleware)
+- `oauth2/` : Package OAuth2 (discovery, client registration, auth flow, tokens, PKCE)
+- `internal/` : Packages internes (config, utils) - non exportables
+
+## Conventions de Code Go
+
+### Nommage
+
+- Utiliser des noms explicites et descriptifs
+- Types exportés : PascalCase (ex: `AuthMiddleware`, `TokenValidator`)
+- Types non exportés : camelCase (ex: `sessionManager`, `tokenValidator`)
+- Constantes : camelCase ou PascalCase selon l'export (ex: `corsAllowedHeaders`)
+- Variables : camelCase
+
+### Structure des Fichiers
+
+- Un package par répertoire
+- Fichiers organisés par responsabilité (ex: `auth_middleware.go`, `handlers.go`)
+- Commentaires de documentation pour les types et fonctions exportés
+
+### Gestion des Erreurs
+
+- Toujours retourner les erreurs, ne jamais les ignorer silencieusement
+- Utiliser `fmt.Errorf` avec `%w` pour envelopper les erreurs
+- Loguer les erreurs avec `log.Printf` pour le débogage
+- Retourner des erreurs HTTP appropriées (401, 403, 500) dans les handlers
+
+### Logging
+
+- Utiliser `log.Printf` pour les messages de log
+- Inclure le contexte pertinent (session ID, erreur, etc.)
+- Format : `log.Printf("Message: %v", variable)`
+
+### Configuration
+
+- Toute la configuration via variables d'environnement
+- Chargement centralisé dans `internal/config/config.go`
+- Validation des valeurs requises au démarrage
+- Valeurs par défaut sensées pour les options
+
+## Patterns d'Architecture
+
+### Middleware Pattern
+
+Les middlewares suivent le pattern standard Go HTTP :
+```go
+func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        // Logique du middleware
+        next.ServeHTTP(w, r)
+    })
+}
+```
+
+### Handler Registry Pattern
+
+Les handlers MCP sont enregistrés via un registre :
+```go
+registry.Register("method/name", func(params json.RawMessage, session *Session) (interface{}, error) {
+    // Logique du handler
+    return result, nil
+})
+```
+
+### Store Pattern
+
+Les stores (ClientStore, AuthCodeStore) utilisent des maps avec mutex pour la concurrence :
+- Utiliser `sync.RWMutex` pour les lectures/écritures concurrentes
+- Nettoyer les entrées expirées périodiquement
+
+## Sécurité
+
+- Validation stricte de l'Origin pour prévenir DNS rebinding
+- Binding localhost par défaut
+- PKCE obligatoire pour tous les clients OAuth2
+- Validation stricte de l'audience des tokens
+- Tokens jamais dans les query strings
+- HTTPS requis pour les endpoints OAuth2 en production
+- Session IDs cryptographiquement sécurisés
+
+## Conformité aux Spécifications
+
+Respecter strictement les spécifications :
+- MCP 2025-06-18 : Implémenter correctement le transport HTTP Streamable
+- OAuth 2.1 : Suivre le flux d'autorisation avec PKCE
+- RFCs : Respecter les formats de métadonnées et endpoints

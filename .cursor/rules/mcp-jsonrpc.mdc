@@ -1,0 +1,160 @@
+---
+description: Règles pour l'implémentation MCP et JSON-RPC 2.0
+globs: ["mcp/**"]
+alwaysApply: false
+---
+
+# MCP et JSON-RPC 2.0
+
+## Spécification MCP 2025-06-18
+
+### Transport HTTP Streamable
+
+Le serveur implémente le transport HTTP Streamable :
+
+- **POST /mcp** : Envoyer des messages JSON-RPC au serveur
+- **GET /mcp** : Ouvrir un stream SSE pour recevoir des messages
+- **DELETE /mcp** : Terminer une session (avec header `Mcp-Session-Id`)
+
+### Headers Requis
+
+- `MCP-Protocol-Version: 2025-06-18` : Version du protocole
+- `Mcp-Session-Id: <session-id>` : Identifiant de session (pour GET/DELETE)
+- `Content-Type: application/json` : Pour les requêtes POST
+- `Accept: text/event-stream` : Pour les requêtes GET (SSE)
+
+### Cycle de Vie
+
+1. **initialize** : Première méthode appelée, retourne les capacités du serveur
+2. **notifications/initialized** : Notification envoyée après initialize
+3. **notifications/cancelled** : Notification pour annuler une requête
+4. **notifications/progress** : Notification pour le progrès d'une opération
+
+## JSON-RPC 2.0
+
+### Format des Requêtes
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/list",
+  "params": {}
+}
+```
+
+### Format des Réponses
+
+**Succès** :
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {}
+}
+```
+
+**Erreur** :
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": {
+    "code": -32600,
+    "message": "Invalid Request",
+    "data": {}
+  }
+}
+```
+
+### Codes d'Erreur JSON-RPC
+
+- `-32700` : Parse error
+- `-32600` : Invalid Request
+- `-32601` : Method not found
+- `-32602` : Invalid params
+- `-32603` : Internal error
+- `-32000` à `-32099` : Erreurs serveur (réservées)
+
+### Notifications
+
+Les notifications n'ont pas d'`id` et ne retournent pas de réponse :
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "notifications/initialized",
+  "params": {}
+}
+```
+
+## Sessions
+
+### Gestion des Sessions
+
+- Créer une session lors de la première requête POST
+- Retourner le `Mcp-Session-Id` dans les headers de réponse
+- Stocker les sessions avec expiration (24h par défaut)
+- Nettoyer les sessions expirées automatiquement
+
+### SSE (Server-Sent Events)
+
+Pour les requêtes GET :
+
+1. Envoyer un événement initial `connection` :
+   ```
+   event: connection
+   data: {"sessionId": "..."}
+   ```
+
+2. Envoyer des keep-alive toutes les 30 secondes :
+   ```
+   : keep-alive
+   ```
+
+3. Envoyer les messages JSON-RPC comme événements :
+   ```
+   event: message
+   data: {"jsonrpc": "2.0", ...}
+   ```
+
+4. Fermer proprement la connexion lors de l'annulation du contexte
+
+## Handlers MCP
+
+### Enregistrement des Handlers
+
+Utiliser le pattern de registre :
+```go
+registry.Register("method/name", func(params json.RawMessage, session *Session) (interface{}, error) {
+    // Parser params si nécessaire
+    var p MyParams
+    if err := json.Unmarshal(params, &p); err != nil {
+        return nil, fmt.Errorf("invalid params: %w", err)
+    }
+    
+    // Logique du handler
+    result := doSomething(p)
+    
+    return result, nil
+})
+```
+
+### Handlers Standard
+
+- `initialize` : Retourne les capacités du serveur
+- `notifications/initialized` : Notification (pas de réponse)
+- `tools/list` : Liste les outils disponibles
+- `resources/list` : Liste les ressources disponibles
+- `prompts/list` : Liste les prompts disponibles
+
+### Gestion des Erreurs dans les Handlers
+
+- Retourner `nil, error` pour les erreurs
+- L'erreur sera convertie en réponse JSON-RPC avec code approprié
+- Utiliser des messages d'erreur descriptifs
+
+## Concurrence
+
+- Les sessions sont thread-safe (utiliser des mutex)
+- Les handlers peuvent être appelés de manière concurrente
+- Utiliser `sync.RWMutex` pour les lectures/écritures concurrentes dans les stores

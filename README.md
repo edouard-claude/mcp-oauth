@@ -1,16 +1,16 @@
 # OAuth2 MCP Server
 
-Boilerplate MCP (Model Context Protocol) avec support OAuth2 HTTP conforme à la spécification 2025-06-18.
+Boilerplate MCP (Model Context Protocol) avec support OAuth2 HTTP conforme à la spécification 2025-11-25.
 
 ## Vue d'ensemble
 
 Ce projet fournit un serveur MCP complet avec authentification OAuth2, implémentant :
 
-- **MCP 2025-06-18** : Transport HTTP Streamable, cycle de vie, JSON-RPC 2.0
+- **MCP 2025-11-25** : Transport HTTP Streamable, cycle de vie, JSON-RPC 2.0
 - **OAuth 2.1** : Flux d'autorisation avec PKCE, validation des tokens
 - **RFC8414** : Authorization Server Metadata
 - **RFC7591** : Dynamic Client Registration
-- **RFC9728** : Protected Resource Metadata
+- **RFC9728** : Protected Resource Metadata (avec découverte OpenID Discovery 1.0)
 - **RFC8707** : Resource Indicators
 
 ## Structure du projet
@@ -130,13 +130,15 @@ Le serveur implémente le flux d'autorisation OAuth2 complet :
 
 Le serveur implémente les meilleures pratiques de sécurité :
 
-- Validation du header `Origin` pour prévenir DNS rebinding
+- Validation du header `Origin` pour prévenir DNS rebinding (403 sur origine invalide)
 - Binding localhost par défaut
 - PKCE obligatoire pour tous les clients
-- Validation stricte de l'audience des tokens
+- Validation stricte de l'audience et de l'issuer des tokens (pas de token passthrough)
 - Tokens jamais dans les query strings
 - HTTPS requis pour les endpoints OAuth2
 - Session IDs cryptographiquement sécurisés
+- Challenge `WWW-Authenticate` incluant les scopes pour consentements progressifs
+- Découverte OpenID Connect 1.0 pour alignement MCP 2025-11-25
 
 ## Développement
 

@@ -47,23 +47,15 @@ type TokenValidationResult struct {
 // 4. Vérifier l'issuer
 // 5. Optionnellement, faire un introspection request
 func (tv *TokenValidator) ValidateToken(token string) (*TokenValidationResult, error) {
-	// Pour l'instant, on fait une validation basique
-	// Dans une implémentation complète, on devrait :
-	// - Parser le JWT si c'est un JWT
-	// - Vérifier la signature
-	// - Vérifier les claims
-
-	// Essayer de parser comme JWT
 	parts := strings.Split(token, ".")
 	if len(parts) == 3 {
-		// C'est probablement un JWT
 		return tv.validateJWT(token)
 	}
 
-	// Sinon, on pourrait faire une introspection request
-	// Pour l'instant, on retourne une validation basique
+	// Refuser les tokens non-JWT pour éviter le token passthrough non vérifié
 	return &TokenValidationResult{
-		Valid: true, // Validation basique - à améliorer
+		Valid: false,
+		Error: fmt.Errorf("unsupported token format: only JWTs are accepted"),
 	}, nil
 }
 
@@ -104,14 +96,19 @@ func (tv *TokenValidator) validateJWT(token string) (*TokenValidationResult, err
 		}
 	}
 
-	// Vérifier la signature si jwtSecret est fourni
-	if tv.jwtSecret != "" {
-		if !tv.verifyJWTSignature(token, parts) {
-			return &TokenValidationResult{
-				Valid: false,
-				Error: fmt.Errorf("invalid JWT signature"),
-			}, nil
-		}
+	if tv.jwtSecret == "" {
+		return &TokenValidationResult{
+			Valid: false,
+			Error: fmt.Errorf("jwt verification key is not configured"),
+		}, nil
+	}
+
+	// Vérifier la signature
+	if !tv.verifyJWTSignature(token, parts) {
+		return &TokenValidationResult{
+			Valid: false,
+			Error: fmt.Errorf("invalid JWT signature"),
+		}, nil
 	}
 
 	// Décoder le payload
@@ -147,11 +144,18 @@ func (tv *TokenValidator) validateJWT(token string) (*TokenValidationResult, err
 	}
 
 	// Vérifier que le token est destiné à cette ressource
-	// Si l'audience est vide, on accepte (pour compatibilité)
-	if len(result.Audience) > 0 && !tv.validateAudience(result.Audience) {
+	if len(result.Audience) == 0 || !tv.validateAudience(result.Audience) {
 		return &TokenValidationResult{
 			Valid: false,
 			Error: fmt.Errorf("token audience does not match resource URI"),
+		}, nil
+	}
+
+	// Vérifier l'issuer
+	if iss, ok := claims["iss"].(string); !ok || iss == "" || !tv.validateAudience([]string{iss}) {
+		return &TokenValidationResult{
+			Valid: false,
+			Error: fmt.Errorf("token issuer not accepted"),
 		}, nil
 	}
 

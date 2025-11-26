@@ -130,8 +130,18 @@ func (am *AuthMiddleware) sendUnauthorized(w http.ResponseWriter, r *http.Reques
 	// Construire l'URL des métadonnées de ressource
 	metadataURL := fmt.Sprintf("%s/.well-known/oauth-protected-resource", am.config.ServerURL)
 
+	scopeChallenge := am.config.Scopes
+	if scopeChallenge == "" {
+		scopeChallenge = "openid"
+	}
+
 	// Envoyer le header WWW-Authenticate selon RFC9728
-	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s", resource_metadata="%s"`, am.config.ServerURL, metadataURL))
+	challenge := fmt.Sprintf(`Bearer realm="%s", resource_metadata="%s"`, am.config.ServerURL, metadataURL)
+	if scopeChallenge != "" {
+		challenge = fmt.Sprintf(`%s, scope="%s"`, challenge, scopeChallenge)
+	}
+
+	w.Header().Set("WWW-Authenticate", challenge)
 	http.Error(w, "Unauthorized", http.StatusUnauthorized)
 }
 
@@ -622,19 +632,21 @@ func (am *AuthMiddleware) ServeOpenIDConfiguration(w http.ResponseWriter, r *htt
 
 	// Si nous sommes en mode serveur d'autorisation intégré, servir directement
 	if am.isIntegratedAuthServer {
-		// Pour OpenID Connect, on peut retourner les mêmes métadonnées que OAuth2
-		// avec quelques champs supplémentaires si nécessaire
-		metadata := oauth2.AuthorizationServerMetadata{
+		metadata := oauth2.OpenIDProviderMetadata{
 			Issuer:                            am.config.ServerURL,
 			AuthorizationEndpoint:             fmt.Sprintf("%s/authorize", am.config.ServerURL),
 			TokenEndpoint:                     fmt.Sprintf("%s/token", am.config.ServerURL),
-			RegistrationEndpoint:              fmt.Sprintf("%s/register", am.config.ServerURL),
-			ScopesSupported:                   []string{"openid"},
+			ScopesSupported:                   strings.Fields(am.config.Scopes),
 			ResponseTypesSupported:            []string{"code"},
 			ResponseModesSupported:            []string{"query"},
 			GrantTypesSupported:               []string{"authorization_code"},
+			SubjectTypesSupported:             []string{"public"},
 			CodeChallengeMethodsSupported:     []string{"S256"},
 			TokenEndpointAuthMethodsSupported: []string{"none"},
+		}
+
+		if len(metadata.ScopesSupported) == 0 {
+			metadata.ScopesSupported = []string{"openid"}
 		}
 
 		// Ajouter les headers CORS

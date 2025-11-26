@@ -9,9 +9,9 @@ import (
 
 // ProtectedResourceMetadata représente les métadonnées de ressource protégée (RFC9728)
 type ProtectedResourceMetadata struct {
-	Resource                string   `json:"resource"`
+	Resource               string   `json:"resource"`
 	AuthorizationServers   []string `json:"authorization_servers"`
-	ScopesSupported         []string `json:"scopes_supported,omitempty"`
+	ScopesSupported        []string `json:"scopes_supported,omitempty"`
 	BearerMethodsSupported []string `json:"bearer_methods_supported,omitempty"`
 }
 
@@ -26,7 +26,23 @@ type AuthorizationServerMetadata struct {
 	ResponseModesSupported            []string `json:"response_modes_supported,omitempty"`
 	GrantTypesSupported               []string `json:"grant_types_supported"`
 	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported,omitempty"`
-	TokenEndpointAuthMethodsSupported  []string `json:"token_endpoint_auth_methods_supported,omitempty"`
+	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported,omitempty"`
+}
+
+// OpenIDProviderMetadata représente la configuration OpenID Connect Discovery 1.0
+type OpenIDProviderMetadata struct {
+	Issuer                            string   `json:"issuer"`
+	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
+	TokenEndpoint                     string   `json:"token_endpoint"`
+	JWKSURI                           string   `json:"jwks_uri,omitempty"`
+	ResponseTypesSupported            []string `json:"response_types_supported"`
+	ResponseModesSupported            []string `json:"response_modes_supported,omitempty"`
+	GrantTypesSupported               []string `json:"grant_types_supported,omitempty"`
+	SubjectTypesSupported             []string `json:"subject_types_supported,omitempty"`
+	ScopesSupported                   []string `json:"scopes_supported,omitempty"`
+	ClaimsSupported                   []string `json:"claims_supported,omitempty"`
+	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported,omitempty"`
+	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported,omitempty"`
 }
 
 // DiscoveryClient gère la découverte OAuth2
@@ -117,11 +133,42 @@ func (dc *DiscoveryClient) GetAuthorizationServerMetadata(authorizationServerURL
 	return &metadata, nil
 }
 
+// GetOpenIDProviderMetadata récupère les métadonnées OpenID Connect Discovery 1.0
+func (dc *DiscoveryClient) GetOpenIDProviderMetadata(authorizationServerURL string) (*OpenIDProviderMetadata, error) {
+	baseURL, err := url.Parse(authorizationServerURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid authorization server URL: %w", err)
+	}
+
+	metadataURL := baseURL.ResolveReference(&url.URL{Path: "/.well-known/openid-configuration"})
+
+	resp, err := dc.httpClient.Get(metadataURL.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch OpenID configuration: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var metadata OpenIDProviderMetadata
+	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
+		return nil, fmt.Errorf("failed to parse OpenID configuration: %w", err)
+	}
+
+	if metadata.Issuer == "" || metadata.AuthorizationEndpoint == "" || metadata.TokenEndpoint == "" {
+		return nil, fmt.Errorf("invalid OpenID configuration: missing required fields")
+	}
+
+	return &metadata, nil
+}
+
 // ParseWWWAuthenticateHeader parse le header WWW-Authenticate pour extraire l'URL de métadonnées
 func ParseWWWAuthenticateHeader(header string) (string, error) {
 	// Format: Bearer realm="...", resource_metadata="..."
 	// On cherche resource_metadata="..."
-	
+
 	// Parsing simple (pour une implémentation complète, utiliser un parser plus robuste)
 	start := "resource_metadata=\""
 	startIdx := -1
@@ -149,4 +196,3 @@ func ParseWWWAuthenticateHeader(header string) (string, error) {
 	metadataURL := header[startIdx:endIdx]
 	return metadataURL, nil
 }
-
